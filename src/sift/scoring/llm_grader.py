@@ -7,6 +7,8 @@ import logging
 import re
 from pathlib import Path
 
+from sift.execution.output_evidence import output_files, input_context, read_evidence_text, check_judge_budget, EvidenceUnavailable
+
 from sift.models import (
     AssertionVerdict,
     EvalCase,
@@ -76,7 +78,7 @@ class LLMGrader:
 
     @staticmethod
     def _load_prompt_template() -> str:
-        prompt_path = Path(__file__).parent.parent.parent.parent / "agents" / "grader.md"
+        prompt_path = Path(__file__).parent / "templates" / "grader.md"
         if prompt_path.exists():
             return prompt_path.read_text(encoding="utf-8")
         return ""
@@ -105,17 +107,17 @@ class LLMGrader:
     @staticmethod
     def _collect_outputs(output_dir: Path) -> str:
         parts: list[str] = []
-        for f in sorted(output_dir.rglob("*")):
+        for f in output_files(output_dir):
             if not (f.is_file() and not f.name.startswith(".")):
                 continue
             try:
-                content = f.read_text(encoding="utf-8", errors="replace")
-                if len(content) > 4000:
-                    content = content[:4000] + "\n... (truncated)"
+                content = read_evidence_text(f)
                 parts.append(f"=== {f.name} ===\n{content}")
+            except EvidenceUnavailable:
+                raise
             except Exception:
                 parts.append(f"=== {f.name} === (binary)")
-        return "\n\n".join(parts) if parts else "(no output files)"
+        return check_judge_budget("\n\n".join(parts)) if parts else "(no output files)"
 
     @staticmethod
     def _extract_json_array(response: str) -> list:
@@ -135,7 +137,10 @@ class LLMGrader:
         *,
         on_usage=None,
     ) -> GradingResult:
-        prompt = self._build_prompt(eval_case, transcript, output_dir)
+        try:
+            prompt = check_judge_budget(self._build_prompt(eval_case, transcript, output_dir))
+        except EvidenceUnavailable as exc:
+            return self._build_uneval_result(eval_case, str(exc))
         response = self.client.complete(prompt, on_usage=on_usage, schema=GRADING_SCHEMA)
 
         if not response or not response.strip():
@@ -161,8 +166,12 @@ class LLMGrader:
         if not tier3_assertions:
             return []
 
-        outputs = self._collect_outputs(output_dir)
-        prompt = self._build_tier3_prompt(tier3_assertions, transcript, outputs)
+        try:
+            outputs = self._collect_outputs(output_dir)
+            source_context = input_context(output_dir)
+            prompt = check_judge_budget(self._build_tier3_prompt(tier3_assertions, transcript, outputs) + "\n\n--- INPUT CONTEXT (NOT ANSWERS) ---\n" + source_context)
+        except EvidenceUnavailable as exc:
+            return [ExpectationResult(text=a.name, passed=False, evidence=str(exc), source="llm", verdict=AssertionVerdict.UNEVAL) for a in tier3_assertions]
         response = self.client.complete(prompt, on_usage=on_usage, schema=_TIER3_SCHEMA)
 
         if not response or not response.strip():
@@ -198,11 +207,11 @@ class LLMGrader:
             + (
                 "\n"
                 "## Transcript\n"
-                f"{transcript[:12000]}"
+                f"{transcript}"
                 "\n"
                 "\n"
                 "## Outputs\n"
-                f"{outputs[:8000]}"
+                f"{outputs}"
                 "\n"
                 "\n"
                 "## Response Format\n"
@@ -267,6 +276,7 @@ class LLMGrader:
 
     def _build_prompt(self, eval_case: EvalCase, transcript: str, output_dir: Path) -> str:
         outputs = self._collect_outputs(output_dir)
+        source_context = input_context(output_dir)
         return (
             (
                 f"{self._prompt_template}\n\n"
@@ -275,8 +285,9 @@ class LLMGrader:
                 f"Eval Name: {eval_case.get_name()}\n"
                 f"Prompt: {eval_case.prompt}\n"
                 f"Expected Output: {eval_case.expected_output}\n\n"
-                f"--- TRANSCRIPT ---\n{transcript[:8000]}\n\n"
-                f"--- OUTPUTS ---\n{outputs[:8000]}\n\n"
+                f"--- TRANSCRIPT ---\n{transcript}\n\n"
+                f"--- OUTPUTS ---\n{outputs}\n\n"
+                f"--- INPUT CONTEXT (SUPPLIED BEFORE EXECUTION; NOT ANSWERS) ---\n{source_context}\n\n"
                 f"--- EXPECTATIONS ---\n"
             )
             + "\n".join(f"- {e}" for e in eval_case.expectations)

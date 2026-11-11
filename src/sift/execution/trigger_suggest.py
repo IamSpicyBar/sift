@@ -13,6 +13,8 @@
 
 from __future__ import annotations
 
+import os
+
 import json
 import time
 
@@ -159,7 +161,7 @@ def build_llm_suggestion(
             timeout=timeout,
             schema=_SUGGEST_SCHEMA,
             on_usage=usage.update,
-            transport="http",
+            transport=os.environ.get("SIFT_LLM_TRANSPORT") or "http",
         )
     except LLMRetryExhausted:
         return None, usage, "LLM 调用重试耗尽(疑似限流)"

@@ -6,6 +6,7 @@ import time
 from pathlib import Path
 from typing import Callable, NamedTuple
 
+from sift.execution.output_evidence import input_context, read_evidence_text, check_judge_budget
 from sift.execution.run_paths import index_runs, is_nested
 from sift.models import ComparisonResult
 from sift.scoring.comparator import BlindComparator
@@ -31,24 +32,17 @@ def _load_grading(run_dir: Path) -> dict | None:
 
 
 def _collect_run_output(run_dir: Path) -> str:
-    outputs_dir = run_dir / "outputs"
-    if not outputs_dir.is_dir():
-        grading = _load_grading(run_dir)
-        if grading:
-            return json.dumps(grading, indent=2, ensure_ascii=False)[:4000]
+    from sift.execution.output_evidence import output_files
+    # A grading report is never an agent answer. Legacy runs without provenance
+    # must be rerun instead of silently comparing copied fixtures/references.
+    answer_path = run_dir / "answer.txt"
+    if not answer_path.exists() or not (run_dir / "input-manifest.json").exists():
         return ""
-    parts = []
-    for f in sorted(outputs_dir.rglob("*")):
-        if not (f.is_file() and not f.name.startswith(".")):
-            continue
-        try:
-            content = f.read_text(encoding="utf-8", errors="replace")
-            if len(content) > 2000:
-                content = content[:2000] + "\n... (truncated)"
-            parts.append(f"=== {f.name} ===\n{content}")
-        except Exception:
-            parts.append(f"=== {f.name} === (binary)")
-    return "\n\n".join(parts) if parts else ""
+    answer = read_evidence_text(answer_path).strip()
+    parts = ["=== Final answer ===\n" + answer] if answer else []
+    for path in output_files(run_dir / "outputs"):
+        parts.append(f"=== {path.relative_to(run_dir / 'outputs')} ===\n" + read_evidence_text(path))
+    return check_judge_budget("\n\n".join(parts))
 
 
 def _comp_path_for(ws_run: Path) -> Path:
@@ -94,6 +88,7 @@ def _compare_with_retry(
                 expectations=expectations if expectations else None,
                 label_a=label_a,
                 label_b=label_b,
+                context_a=comparison.context_a, context_b=comparison.context_b,
             ),
         )
         if on_duration:
@@ -168,10 +163,12 @@ def run_comparisons(
         try:
             ws_output = _collect_run_output(ws_run)
             wos_output = _collect_run_output(wos_run)
+            if not ws_output.strip() or not wos_output.strip():
+                raise ValueError("Missing answer or output provenance")
             ws_grading = _load_grading(ws_run)
 
-            merged_prompt_path = iteration_dir / "merged_prompt.txt"
-            eval_prompt = merged_prompt_path.read_text(encoding="utf-8")[:2000] if merged_prompt_path.exists() else ""
+            merged_prompt_path = ws_run / "eval-prompt.txt"
+            eval_prompt = merged_prompt_path.read_text(encoding="utf-8") if merged_prompt_path.exists() else ""
 
             expectations = []
             if ws_grading:
@@ -186,6 +183,7 @@ def run_comparisons(
                     expectations=expectations,
                     label_a=label_a,
                     label_b=label_b,
+                    context_a=input_context(ws_run / "outputs"), context_b=input_context(wos_run / "outputs"),
                 ),
                 callbacks=ScoringCallbacks(on_usage=on_usage, on_duration=on_duration),
             )

@@ -804,6 +804,8 @@ class TestComparisonSides:
     def _make_run(base: Path, marker: str) -> None:
         (base / "outputs").mkdir(parents=True, exist_ok=True)
         (base / "outputs" / "out.txt").write_text(marker, encoding="utf-8")
+        (base / "answer.txt").write_text(marker, encoding="utf-8")
+        (base / "input-manifest.json").write_text('{"version":1,"files":{}}', encoding="utf-8")
 
     def test_v1v2_sides_drive_dirs_and_labels(self, tmp_path: Path, monkeypatch):
         seen_labels: list[tuple] = []
@@ -968,6 +970,8 @@ class TestComparisonPoolIsolation:
     def _make_run(base: Path, marker: str) -> None:
         (base / "outputs").mkdir(parents=True, exist_ok=True)
         (base / "outputs" / "out.txt").write_text(marker, encoding="utf-8")
+        (base / "answer.txt").write_text(marker, encoding="utf-8")
+        (base / "input-manifest.json").write_text('{"version":1,"files":{}}', encoding="utf-8")
 
     def test_crashing_pair_becomes_failed_tie_pool_continues(self, tmp_path: Path, monkeypatch, caplog):
         class _CrashOnMarker:
@@ -1287,6 +1291,8 @@ def _aggregate_fixture(iteration: Path, tmp_path: Path):
 def make_comparison_run(base: Path, marker: str, expectations_text: str | None = None) -> None:
     (base / "outputs").mkdir(parents=True, exist_ok=True)
     (base / "outputs" / "out.txt").write_text(marker, encoding="utf-8")
+    (base / "answer.txt").write_text(marker, encoding="utf-8")
+    (base / "input-manifest.json").write_text('{"version":1,"files":{}}', encoding="utf-8")
     if expectations_text is not None:
         (base / "grading.json").write_text(
             json.dumps(_grading_payload(expectations=[{"text": expectations_text}], summary={})),

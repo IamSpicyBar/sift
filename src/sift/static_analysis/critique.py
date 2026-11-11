@@ -8,6 +8,7 @@ transcript,补上 critique 原先只查正文、漏 description 的一面。两�
 """
 
 import json
+import os
 import re
 import time
 from collections import Counter
@@ -359,7 +360,7 @@ def _critique_call(prompt: str, model: str | None, timeout: int) -> tuple[str | 
             response = call_claude(
                 prompt=prompt,
                 on_usage=usage.update,
-                config=LLMCallConfig(model=model, timeout=timeout, transport="http"),
+                config=LLMCallConfig(model=model, timeout=timeout, transport=os.environ.get("SIFT_LLM_TRANSPORT") or "http"),
             )
         except (HttpRateLimited, RuntimeError):
             response = None

@@ -766,7 +766,7 @@ class InstructionEngine:
                 on_usage=on_usage,
                 label="headline",
                 schema=_HEADLINE_SCHEMA,
-                transport="http",
+                transport=os.environ.get("SIFT_LLM_TRANSPORT") or "http",
             ),
         )
         for start, parsed in successes:
@@ -1177,7 +1177,7 @@ class InstructionEngine:
                 on_usage=on_usage,
                 label="精筛",
                 schema=_CLASSIFY_REAL_SCHEMA,
-                transport="http",
+                transport=os.environ.get("SIFT_LLM_TRANSPORT") or "http",
             ),
         )
         for start, parsed in successes:
@@ -2533,7 +2533,7 @@ def _run_instruction_batches(
         parse_fn=parse_fn,
         total=len(specs),
         is_unparsed=lambda value: value[0] is None,
-        options=options._replace(transport="http"),
+        options=options._replace(transport=options.transport or os.environ.get("SIFT_LLM_TRANSPORT") or "http"),
     )
     for start, parsed in successes:
         for local_index, value in enumerate(parsed):

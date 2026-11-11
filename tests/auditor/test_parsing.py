@@ -397,7 +397,7 @@ def test_judge_batch_with_retry_forwards_transport_to_call_claude(monkeypatch):
             model=None, timeout=10, on_progress=None, on_usage=None, schema=None, label="X", transport="http"
         ),
     )
-    assert seen["transports"] == ["cc", "http"]
+    assert seen["transports"] == [None, "http"]
 
 
 def _is_reference_read_step(finding):

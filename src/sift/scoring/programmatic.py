@@ -10,6 +10,8 @@ import sys
 from pathlib import Path
 from typing import TYPE_CHECKING, NamedTuple
 
+from sift.execution.output_evidence import output_files
+
 from sift.models import (
     AssertionTier,
     AssertionType,
@@ -29,6 +31,7 @@ class ExecutionEvidence(NamedTuple):
     tool_trace: list | None = None
     num_turns: int = 0
     stop_reason: str = ""
+    final_answer: str = ""
 
 
 class ProgrammaticChecker:
@@ -79,7 +82,7 @@ class ProgrammaticChecker:
             if re.search(pattern, content):
                 return AssertionVerdict.PASS, f"Pattern '{pattern}' found in {filepath or target}"
             return AssertionVerdict.FAIL, f"Pattern '{pattern}' not found in {filepath or target}"
-        for f in output_dir.rglob("*"):
+        for f in output_files(output_dir):
             if not (f.is_file()):
                 continue
             try:
@@ -89,8 +92,8 @@ class ProgrammaticChecker:
             except Exception:
                 logging.getLogger(__name__).debug("Optional operation failed; continuing with fallback", exc_info=True)
                 continue
-        # Fallback: search in transcript (supports advisory/knowledge skills with no file output)
-        transcript = ctx.get("transcript", "")
+        # Content assertions use the final answer; explicit transcript scope keeps process evidence.
+        transcript = ctx.get("final_answer") or ctx.get("transcript", "")
         if transcript and re.search(pattern, transcript):
             return AssertionVerdict.PASS, f"Pattern '{pattern}' found in transcript"
         return AssertionVerdict.FAIL, f"Pattern '{pattern}' not found in any file or transcript"
@@ -117,7 +120,7 @@ class ProgrammaticChecker:
             count = len(target.read_text(encoding="utf-8", errors="replace").splitlines())
         else:
             total = 0
-            for f in output_dir.rglob("*"):
+            for f in output_files(output_dir):
                 if not (f.is_file()):
                     continue
                 total += len(f.read_text(encoding="utf-8", errors="replace").splitlines())
@@ -146,7 +149,7 @@ class ProgrammaticChecker:
                 return AssertionVerdict.FAIL, f"Pattern '{pattern}' found (should be absent)"
             return AssertionVerdict.PASS, f"Pattern '{pattern}' not found"
 
-        for f in output_dir.rglob("*"):
+        for f in output_files(output_dir):
             if not (f.is_file()):
                 continue
             try:
@@ -231,6 +234,7 @@ class ProgrammaticChecker:
         results: list[ExpectationResult] = []
         context = {
             "transcript": transcript,
+            "final_answer": evidence.final_answer,
             "tool_trace": tool_trace or [],
             "num_turns": num_turns,
             "stop_reason": stop_reason,

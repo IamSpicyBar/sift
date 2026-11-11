@@ -84,7 +84,7 @@ class BatchJudgeOptions(NamedTuple):
     on_usage: Callable[[dict], None] | None = None
     label: str = ""
     schema: dict | None = None
-    transport: str = "cc"
+    transport: str | None = None
 
 
 class AuditFeatures(NamedTuple):

@@ -27,6 +27,7 @@ from sift.execution.cli_runner import (  # noqa: F401 — re-exported for backwa
 )
 from sift.execution.dsh_runner import DshRunner
 from sift.execution.options import ExecutionOptions
+from sift.execution.output_evidence import snapshot_inputs
 from sift.execution.progress import ProgressUpdate
 from sift.models import (
     AssertionVerdict,
@@ -57,6 +58,7 @@ class CheckpointContext(NamedTuple):
     stop_reason: str = ""
     on_usage: Callable | None = None
     on_duration: Callable | None = None
+    final_answer: str = ""
 
 
 def _copy_skill_references(skill_path: Path | None, work_dir: Path) -> None:
@@ -573,6 +575,8 @@ class ABTestRunner:
             if retry_num == 0 and self._reuse_cached_run(progress_context, config_dir, cache_key, lock):
                 return run_label
             outputs_dir = config_dir / "outputs"
+            if outputs_dir.exists():
+                shutil.rmtree(outputs_dir)
             outputs_dir.mkdir(exist_ok=True)
             eval_case.setup_fixtures(outputs_dir)
             # setup_source 钉主 skill(positional skill_path)对两边都用 —— 同卷保证:
@@ -582,6 +586,7 @@ class ABTestRunner:
             if inject_skill:
                 _copy_skill_references(inject_skill, outputs_dir)
 
+            snapshot_inputs(outputs_dir)
             run_start = time.time()
             use_skill = inject_skill
             prompt = eval_case.prompt
@@ -592,6 +597,7 @@ class ABTestRunner:
 
             self._emit_progress(progress_context, _RunProgressEvent(None, 0.0, None, phase="executing"))
 
+            (config_dir / "eval-prompt.txt").write_text(prompt, encoding="utf-8")
             attempt = _RunAttempt(
                 _RunScoringContext(config_dir, outputs_dir, cache_key, progress_context),
                 _RunDebugContext(eval_case, config_name, run_num, prompt),
@@ -622,6 +628,7 @@ class ABTestRunner:
         self, attempt: _RunAttempt, run_output: RunOutput, overall_grading: GradingResult, skill_name: str
     ) -> None:
         """写入 transcript，完成过程审计及校准，最后保存调试记录。"""
+        (attempt.scoring.config_dir / "answer.txt").write_text(run_output.result_text or run_output.transcript, encoding="utf-8")
         if run_output.stdout:
             (attempt.scoring.config_dir / "transcript.jsonl").write_text(run_output.stdout, encoding="utf-8")
 
@@ -655,6 +662,7 @@ class ABTestRunner:
             [eval_case],
             CheckpointContext(
                 transcript=run_output.transcript,
+                final_answer=run_output.result_text,
                 outputs_dir=outputs_dir,
                 tool_trace=run_output.tool_trace,
                 num_turns=run_output.num_turns,
@@ -952,17 +960,23 @@ def _grade_checkpoint(
     scoring_config: ScoringConfig, eval_case: EvalCase, prog_checker, context: CheckpointContext
 ) -> list:
     """先执行程序断言，再执行模型评分和 TIER3 断言，逐段记录用量及耗时。"""
-    transcript, outputs_dir, tool_trace, num_turns, stop_reason, on_usage, on_duration = context
+    transcript, outputs_dir, tool_trace, num_turns, stop_reason, on_usage, on_duration, final_answer = context
     prog_results = []
     if prog_checker:
         prog_results = prog_checker.check(
             eval_case=eval_case,
             output_dir=outputs_dir,
             evidence=ExecutionEvidence(
-                transcript=transcript, tool_trace=tool_trace, num_turns=num_turns, stop_reason=stop_reason
+                transcript=transcript, tool_trace=tool_trace, num_turns=num_turns, stop_reason=stop_reason, final_answer=final_answer
             ),
         )
 
+    judge_transcript = transcript
+    if final_answer:
+        judge_transcript += "\n\n--- FINAL ANSWER ---\n" + final_answer
+    if tool_trace:
+        trace_data = [record.model_dump(mode="json") if hasattr(record, "model_dump") else record for record in tool_trace]
+        judge_transcript += "\n\n--- OBSERVED TOOL TRACE ---\n" + json.dumps(trace_data, ensure_ascii=False, default=str)
     llm_results = []
     tier3_results = []
     if scoring_config.enable_llm:
@@ -977,7 +991,7 @@ def _grade_checkpoint(
             _t0 = time.perf_counter()
             llm_grading = grader.grade(
                 eval_case=eval_case,
-                transcript=transcript,
+                transcript=judge_transcript,
                 output_dir=outputs_dir,
                 on_usage=on_usage,
             )
@@ -988,7 +1002,7 @@ def _grade_checkpoint(
         tier3_assertions = [a for a in eval_case.assertions if a.tier and a.tier.value == "TIER3"]
         if tier3_assertions:
             _t0 = time.perf_counter()
-            tier3_results = grader.grade_tier3(tier3_assertions, transcript, outputs_dir, on_usage=on_usage)
+            tier3_results = grader.grade_tier3(tier3_assertions, judge_transcript, outputs_dir, on_usage=on_usage)
             if on_duration:
                 on_duration(time.perf_counter() - _t0)
 

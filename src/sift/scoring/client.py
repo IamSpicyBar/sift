@@ -4,6 +4,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import os
+import logging
 
 from sift.concurrency import LLMRetryExhausted, call_llm_with_retry
 
@@ -24,7 +26,8 @@ class ScoringClient:
                 timeout=self.timeout,
                 schema=self.default_schema if schema is None else schema,
                 on_usage=on_usage,
-                transport="http",
+                transport=os.environ.get("SIFT_LLM_TRANSPORT") or "http",
             )
-        except LLMRetryExhausted:
+        except LLMRetryExhausted as exc:
+            logging.getLogger(__name__).warning("Scoring request failed: %s", exc)
             return ""

@@ -26,6 +26,8 @@ skipped_reason;**无 FAIL 是正常终态 → 返回 None 不落盘**(同 trigge
 
 from __future__ import annotations
 
+import os
+
 import json
 import threading
 import time
@@ -261,7 +263,7 @@ class _SuggestionBatchRunner:
                 timeout=self.timeout,
                 schema=_WIRE_SCHEMA,
                 on_usage=self._on_usage,
-                transport="http",
+                transport=os.environ.get("SIFT_LLM_TRANSPORT") or "http",
                 on_progress=prog,  # http 升档/cc 回退进度行(单发最长 600s,静默像死机)
                 max_tokens=mt,
             )

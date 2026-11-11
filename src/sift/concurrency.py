@@ -265,6 +265,7 @@ def call_llm_with_retry(
             time.sleep(_LLM_WRAPPER_BACKOFF * (2**attempt) + random.uniform(0, 1))
             continue
         except RuntimeError as exc:
+            logging.getLogger(__name__).warning("LLM call failed: %s", exc)
             _emit(on_progress, f"  LLM 调用失败: {str(exc)[:120]}")
             continue
         LLM_LIMITER.on_success()  # 成功才到这(with 已 release),AIMD 加性增

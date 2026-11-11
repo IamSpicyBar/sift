@@ -57,7 +57,8 @@ class BlindComparator:
             pos_a, pos_b = output_a, output_b
         else:
             pos_a, pos_b = output_b, output_a
-        prompt = build_comparison_prompt(self._prompt_template, pos_a, pos_b, eval_prompt, expectations)
+        context_a, context_b = (comparison.context_a, comparison.context_b) if side0_is_pos_a else (comparison.context_b, comparison.context_a)
+        prompt = build_comparison_prompt(self._prompt_template, pos_a, pos_b, eval_prompt, expectations, context_a, context_b)
         response = self.client.complete(prompt, on_usage=on_usage)
         raw = parse_comparison_result(response)
         return translate_comparison_result(raw, side0_is_pos_a=side0_is_pos_a, label_a=label_a, label_b=label_b)
